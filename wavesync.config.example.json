@@ -1,0 +1,21 @@
+{
+  "video_root": "W:/TDvorak_Pictures/hluk/hluk - vi",
+  "audio_root": "W:/TDvorak_Pictures/hluk/hluk - se",
+  "work_dir":   "W:/TDvorak_Pictures/hluk/_sync",
+
+  "mics": {
+    "dr07xp":   {"folder": "dr07xp",   "lane": -1, "rolling": false},
+    "dr10lpro": {"folder": "dr10lpro", "lane": -2, "rolling": true}
+  },
+
+  "day_map": {
+    "dr07xp": {"2026-08-28": "2026-08-29"}
+  },
+
+  "skip_dirs":      ["main", "poznamky", "weird", "covered"],
+  "skip_prefixes":  ["final-test", "recording-day"],
+
+  "analysis_filter": "dynaudnorm=f=250:g=15:m=25",
+  "sample_rate": 8000,
+  "min_r_timeline": 0.20
+}
