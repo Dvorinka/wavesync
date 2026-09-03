@@ -28,6 +28,7 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -65,6 +66,22 @@ SKIP_PREFIXES = ("final-test", "recording-day")
 # envelope + Pearson probes can lock onto low-level content (files untouched)
 ANALYSIS_AF = "dynaudnorm=f=250:g=15:m=25"
 
+# Anything ffprobe/ffmpeg can decode is fair game. These are extension
+# filters only (probing every file would be slow); extend via config keys
+# "video_exts" / "audio_exts". Camera proxy sidecars (.lrv, .thm) are
+# deliberately excluded - they duplicate the main clip's audio.
+VIDEO_EXTS = {
+    ".mp4", ".mov", ".mxf", ".mts", ".m2ts", ".avi", ".mkv", ".mpg",
+    ".mpeg", ".ts", ".webm", ".3gp", ".insv", ".crm", ".braw", ".r3d",
+    ".m4v", ".vob", ".wmv", ".flv",
+}
+AUDIO_EXTS = {
+    ".wav", ".bwf", ".mp3", ".m4a", ".aac", ".flac", ".aif", ".aiff",
+    ".ogg", ".oga", ".opus", ".w64", ".caf", ".wv", ".mp2",
+}
+# folder names that look like a shooting day (2026-08-14, 2026_08_14, ...)
+DAY_RE = re.compile(r"^\d{4}[-_.]\d{2}[-_.]\d{2}")
+
 DEFAULT_CONFIG_NAME = "wavesync.config.json"
 
 
@@ -74,6 +91,7 @@ def apply_config(cfg: dict, base: Path):
     global VI_DIR, SE_DIR, CACHE, REPORTS, TIMELINES, PREVIEWS
     global MICS, LANES, MIC_FOLDERS, DAY_MAP
     global SKIP_DIRS, SKIP_PREFIXES, ANALYSIS_AF, ROLLING_MICS
+    global VIDEO_EXTS, AUDIO_EXTS
 
     def _p(key, default=None):
         v = cfg.get(key, default)
@@ -88,13 +106,13 @@ def apply_config(cfg: dict, base: Path):
     PREVIEWS = work / "previews"
 
     mics = cfg.get("mics")
-    if not mics:
-        # fallback: every folder under audio_root is a mic, lanes -1..-n
-        if SE_DIR.is_dir():
-            mics = {d.name: {} for d in sorted(SE_DIR.iterdir())
-                    if d.is_dir()}
-        else:
-            mics = {}
+    if not mics and SE_DIR.is_dir():
+        # fallback: every folder under audio_root is a mic, lanes -1..-n;
+        # if audio_root holds files directly, treat it as one mic
+        mics = {d.name: {} for d in sorted(SE_DIR.iterdir()) if d.is_dir()}
+        if not mics and any(is_audio(p) for p in SE_DIR.iterdir()
+                            if p.is_file()):
+            mics = {SE_DIR.name or "audio": {"folder": "."}}
     MICS = list(mics.keys())
     ROLLING_MICS = set()
     for i, (name, mc) in enumerate(mics.items()):
@@ -107,12 +125,29 @@ def apply_config(cfg: dict, base: Path):
     SKIP_DIRS = set(cfg.get("skip_dirs", sorted(SKIP_DIRS)))
     SKIP_PREFIXES = tuple(cfg.get("skip_prefixes", list(SKIP_PREFIXES)))
     ANALYSIS_AF = cfg.get("analysis_filter", ANALYSIS_AF)
+    VIDEO_EXTS = _ext_set(cfg.get("video_exts"), VIDEO_EXTS)
+    AUDIO_EXTS = _ext_set(cfg.get("audio_exts"), AUDIO_EXTS)
     SR = int(cfg.get("sample_rate", SR))
     ENV_FPS = SR // HOP
     MIN_OVERLAP_S = float(cfg.get("min_overlap_s", MIN_OVERLAP_S))
     MIN_Z = float(cfg.get("min_z", MIN_Z))
     MIN_Z_RAW = float(cfg.get("min_z_raw", MIN_Z_RAW))
     MIN_R_TIMELINE = float(cfg.get("min_r_timeline", MIN_R_TIMELINE))
+
+
+def _ext_set(cfg_list, default):
+    """Config override for extension sets; accepts 'mp4' or '.mp4'."""
+    if not cfg_list:
+        return default
+    return {"." + e.lstrip(".").lower() for e in cfg_list}
+
+
+def is_video(p: Path) -> bool:
+    return p.suffix.lower() in VIDEO_EXTS
+
+
+def is_audio(p: Path) -> bool:
+    return p.suffix.lower() in AUDIO_EXTS
 
 
 def load_config(path: Path) -> dict:
@@ -224,21 +259,49 @@ def correlate(env_v: np.ndarray, env_w: np.ndarray):
     return lag, peak, float(z), overlap
 
 
-def gather_wavs(day: str, se_dir: Path):
+def _skipped(p: Path, base: Path) -> bool:
+    rel = p.relative_to(base)
+    if any(part.lower() in SKIP_DIRS for part in rel.parts[:-1]):
+        return True
+    return p.name.lower().startswith(SKIP_PREFIXES)
+
+
+def gather_wavs(day: str, se_dir: Path, vi_dir: Path = None):
+    """Audio files for `day`, per mic. If the mic has no <day> folder the
+    mic folder is scanned wholesale, minus subfolders that look like
+    OTHER days (flat recorder dumps keep working)."""
+    other_days = set()
+    if vi_dir is not None and vi_dir.is_dir():
+        other_days = {d.name for d in vi_dir.iterdir() if d.is_dir()}
+        other_days.discard(day)
     out = []
     for mic in MICS:
         sub = DAY_MAP.get(mic, {}).get(day, day)
-        d = se_dir / MIC_FOLDERS.get(mic, mic) / sub
-        if not d.is_dir():
+        mic_dir = se_dir / MIC_FOLDERS.get(mic, mic)
+        d = mic_dir / sub
+        base = d if d.is_dir() else mic_dir
+        if not base.is_dir():
             continue
-        for p in sorted(d.rglob("*.wav")):
-            rel = p.relative_to(d)
-            if any(part.lower() in SKIP_DIRS for part in rel.parts[:-1]):
+        for p in sorted(base.rglob("*")):
+            if not (p.is_file() and is_audio(p)):
                 continue
-            if p.name.lower().startswith(SKIP_PREFIXES):
+            rel = p.relative_to(base)
+            if base is mic_dir and any(
+                    part in other_days or DAY_RE.match(part)
+                    for part in rel.parts[:-1]):
+                continue
+            if _skipped(p, base):
                 continue
             out.append((mic, p))
     return out
+
+
+def gather_videos(vdir: Path):
+    """All video files under a day folder, any container, any depth."""
+    if not vdir.is_dir():
+        return []
+    return sorted(p for p in vdir.rglob("*")
+                  if p.is_file() and is_video(p) and not _skipped(p, vdir))
 
 
 def run_day(day: str, topn: int = 2, vi_dir: Path = None,
@@ -247,14 +310,19 @@ def run_day(day: str, topn: int = 2, vi_dir: Path = None,
     vi_dir = vi_dir or VI_DIR
     se_dir = se_dir or SE_DIR
     vdir = vi_dir / day
-    videos = sorted(set(vdir.glob("*.MP4")) | set(vdir.glob("*.mp4")))
+    if not vdir.is_dir() and vi_dir.is_dir():
+        # flat video_root: no day folders at all -> the root IS the day
+        if any(is_video(p) for p in vi_dir.iterdir() if p.is_file()):
+            vdir = vi_dir
+    videos = gather_videos(vdir)
     if only_video:
         videos = [v for v in videos if v.name == only_video]
     if video_range:
         lo, hi = video_range
         videos = [v for v in videos if lo <= v.stem <= hi]
-    wavs = gather_wavs(day, se_dir)
-    print(f"[{day}] {len(videos)} videos x {len(wavs)} wavs", flush=True)
+    wavs = gather_wavs(day, se_dir, vi_dir)
+    print(f"[{day}] {len(videos)} videos x {len(wavs)} audio files",
+          flush=True)
 
     wav_envs = {}
     for mic, wp in wavs:
