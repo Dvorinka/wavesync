@@ -39,6 +39,8 @@ import numpy as np
 from scipy.signal import fftconvolve
 from scipy.ndimage import median_filter
 
+__version__ = "0.2.0"
+
 # ---------------------------------------------------------------------------
 # configuration -- everything project-specific comes from wavesync.config.json
 # (see wavesync.config.example.json). The values below are fallbacks.
@@ -157,9 +159,8 @@ def load_config(path: Path) -> dict:
 
 
 def decode_audio(path: Path, sr: int = None) -> np.ndarray:
-    """Decode a media file's first audio stream to mono f32."""
-    sr = sr or SR
     """Decode a media file's first audio stream to mono f32 @ sr."""
+    sr = sr or SR
     cmd = [
         "ffmpeg", "-v", "error", "-i", str(path),
         "-vn", "-ac", "1", "-af", ANALYSIS_AF, "-ar", str(sr),
@@ -302,6 +303,68 @@ def gather_videos(vdir: Path):
         return []
     return sorted(p for p in vdir.rglob("*")
                   if p.is_file() and is_video(p) and not _skipped(p, vdir))
+
+
+def _has_media(root: Path, pred, probe: int = 4000) -> bool:
+    """True if `root` contains a matching file within the first `probe`
+    entries (bounded so huge trees don't stall autodetect)."""
+    try:
+        for i, p in enumerate(root.rglob("*")):
+            if i >= probe:
+                return True   # likely media deeper in; call it a hit
+            if p.is_file() and pred(p):
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def list_days(vi_dir: Path):
+    """Day folder names under video_root; [] for flat layouts."""
+    if not vi_dir or not vi_dir.is_dir():
+        return []
+    days = [d.name for d in sorted(vi_dir.iterdir())
+            if d.is_dir() and _has_media(d, is_video)]
+    return days
+
+
+def autodetect_config(video_root: Path, audio_root: Path,
+                      work_dir: Path = None) -> dict:
+    """Build a config dict by inspecting the media roots.
+
+    Every subfolder of audio_root containing audio files becomes a mic
+    (lanes -1, -2, ...). If audio_root holds files directly it becomes a
+    single mic itself. Days are the video_root subfolders with videos in
+    them (flat roots get day 'all' semantics via the run_day fallback).
+    """
+    cfg = {
+        "video_root": str(video_root),
+        "audio_root": str(audio_root),
+        "work_dir": str(work_dir or Path.cwd() / "_wavesync"),
+    }
+    mics = {}
+    lane = 0
+    for d in sorted(audio_root.iterdir()):
+        if d.is_dir() and _has_media(d, is_audio):
+            lane -= 1
+            mics[d.name] = {"folder": d.name, "lane": lane,
+                            "rolling": False}
+    if not mics and any(p.is_file() and is_audio(p)
+                        for p in audio_root.iterdir()):
+        mics["recorder"] = {"folder": ".", "lane": -1, "rolling": False}
+    cfg["mics"] = mics
+    cfg["skip_dirs"] = sorted(SKIP_DIRS)
+    cfg["skip_prefixes"] = list(SKIP_PREFIXES)
+    cfg["analysis_filter"] = ANALYSIS_AF
+    cfg["sample_rate"] = SR
+    cfg["min_r_timeline"] = MIN_R_TIMELINE
+    return cfg
+
+
+def write_config(cfg: dict, path: Path, force: bool = False):
+    if path.exists() and not force:
+        raise SystemExit(f"{path} exists - pass --force to overwrite")
+    path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
 
 
 def run_day(day: str, topn: int = 2, vi_dir: Path = None,
@@ -1252,13 +1315,46 @@ def main():
     ap.add_argument("--only-video", help="restrict to one video filename")
     ap.add_argument("--video-range",
                     help="restrict to a stem range, e.g. C0357-C0380")
+    ap.add_argument("--init", action="store_true",
+                    help="write a config by auto-detecting mics/days "
+                         "under --video-root and --audio-root")
+    ap.add_argument("--video-root", help="camera footage root (with --init)")
+    ap.add_argument("--audio-root", help="recorder audio root (with --init)")
+    ap.add_argument("--work-dir", help="reports/cache/timelines dir "
+                                     "(with --init)")
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite an existing config (with --init)")
+    ap.add_argument("--gui", action="store_true",
+                    help="launch the local web UI and exit")
+    ap.add_argument("--port", type=int, default=8710,
+                    help="web UI port (with --gui, default 8710)")
+    ap.add_argument("--version", action="version",
+                    version=f"wavesync {__version__}")
     args = ap.parse_args()
 
     if args.selftest:
         selftest()
         return
+    if args.gui:
+        import wavesync_gui
+        wavesync_gui.serve(port=args.port,
+                           config=args.config if args.config !=
+                           DEFAULT_CONFIG_NAME else None)
+        return
+    if args.init:
+        if not (args.video_root and args.audio_root):
+            ap.error("--init needs --video-root and --audio-root")
+        cfg = autodetect_config(Path(args.video_root),
+                                Path(args.audio_root),
+                                Path(args.work_dir) if args.work_dir
+                                else None)
+        write_config(cfg, Path(args.config), force=args.force)
+        days = list_days(Path(args.video_root))
+        print(f"wrote {args.config}: {len(cfg['mics'])} mic(s) "
+              f"{list(cfg['mics'])}, {len(days)} day folder(s)")
+        return
     if not args.day:
-        ap.error("need a day, 'all', or --selftest")
+        ap.error("need a day, 'all', --init, --gui, or --selftest")
 
     cfg_path = Path(args.config)
     if not cfg_path.exists():
@@ -1271,8 +1367,15 @@ def main():
     if args.root:
         r = Path(args.root)
         vi_dir, se_dir = r / "videos", r / "audio"
-    days = ([d.name for d in sorted(vi_dir.iterdir()) if d.is_dir()]
-            if args.day == "all" else [args.day])
+    if args.day == "all":
+        days = list_days(vi_dir)
+        if not days and vi_dir.is_dir() and any(
+                is_video(p) for p in vi_dir.iterdir() if p.is_file()):
+            days = [vi_dir.name]     # flat root: the root is the day
+        if not days:
+            ap.error(f"no day folders (or videos) under {vi_dir}")
+    else:
+        days = [args.day]
     for day in days:
         if args.timeline_only:
             results = json.loads(
@@ -1283,7 +1386,7 @@ def main():
             (REPORTS / f"{day}_sync.json").write_text(
                 json.dumps(results, indent=1))
             videos = [Path(r["video"]) for r in results]
-            wavs = [p for m, p in gather_wavs(day, se_dir)]
+            wavs = [p for m, p in gather_wavs(day, se_dir, vi_dir)]
             fx = write_fcpxml(day, results, videos, wavs,
                               TIMELINES / f"{day}.fcpxml")
             print(f"  -> timelines/{fx.name} (from cached JSON)")
@@ -1297,11 +1400,21 @@ def main():
             for r in results:
                 if args.only_video and r["video_name"] != args.only_video:
                     continue
-                for mic, c in r["best"].items():
+                # best selected match per mic on this clip
+                best = {}
+                for c in r["matches"]:
+                    if c.get("selected") and (
+                            c["mic"] not in best
+                            or c.get("r_med", 0)
+                            > best[c["mic"]].get("r_med", 0)):
+                        best[c["mic"]] = c
+                for mic, c in best.items():
                     if mic in done:
                         continue
                     done.add(mic)
-                    out = PREVIEWS / day / f"{Path(r['video_name']).stem}__{mic}__{Path(c['wav_name']).stem}.mp4"
+                    stem_v = Path(r["video_name"]).stem
+                    stem_w = Path(c["wav_name"]).stem
+                    out = PREVIEWS / day / f"{stem_v}__{mic}__{stem_w}.mp4"
                     out.parent.mkdir(parents=True, exist_ok=True)
                     o = render_preview(Path(r["video"]), Path(c["wav"]),
                                        c["shift_sec"], r["video_dur"], out)
