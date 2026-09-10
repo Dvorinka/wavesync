@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wavesync"
+version = "0.2.0"
+description = "Sync external recorder audio to camera footage -> FCPXML timeline for DaVinci Resolve"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Tomas Dvorak", email = "contact.dvorak@gmail.com"}]
+keywords = ["audio-sync", "davinci-resolve", "fcpxml", "video-production",
+            "multicam", "field-recording"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Video",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+wavesync = "wavesync:main"
+wavesync-gui = "wavesync_gui:main"
+
+[project.urls]
+Homepage = "https://github.com/Dvorinka/wavesync"
+Issues = "https://github.com/Dvorinka/wavesync/issues"
+
+[tool.setuptools]
+py-modules = ["wavesync", "wavesync_gui"]
