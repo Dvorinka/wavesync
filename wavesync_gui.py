@@ -548,6 +548,25 @@ table{border-collapse:collapse;width:100%}
     <div id="cfgmsg" class="msg info"></div>
   </div></div>
 
+  <div class="panel"><header>Scan</header><div class="body">
+    <label class="f">Day folder</label>
+    <div id="daylist"><div class="dempty">no video root set</div></div>
+    <div class="cbxrow">
+      <label class="cbx"><input type=checkbox id="alldays"><span
+        class="box"></span>all days</label>
+      <label class="cbx"><input type=checkbox id="timeline_only"><span
+        class="box"></span>timeline only</label>
+      <label class="cbx"><input type=checkbox id="preview"><span
+        class="box"></span>previews</label></div>
+    <label class="f">Video range (e.g. C0357-C0380)</label>
+    <input id="video_range" type=text>
+    <div class="btnrow">
+      <button class="acc" id="runbtn" onclick="scan()">Run scan</button>
+      <button onclick="selftest()">Self&#8209;test</button>
+      <button onclick="outputs()">Outputs</button></div>
+    <div id="scanmsg" class="msg info"></div>
+  </div></div>
+
   <div class="panel"><header>Recorders / mics</header><div class="body">
     <table id="mics"><thead><tr>
       <th>name</th><th>folder</th><th style="width:44px">lane</th>
@@ -566,25 +585,6 @@ table{border-collapse:collapse;width:100%}
     <input id="skip_dirs" type=text>
     <label class="f">Skip prefixes</label>
     <input id="skip_prefixes" type=text>
-  </div></div>
-
-  <div class="panel"><header>Scan</header><div class="body">
-    <label class="f">Day folder</label>
-    <div id="daylist"><div class="dempty">no video root set</div></div>
-    <div class="cbxrow">
-      <label class="cbx"><input type=checkbox id="alldays"><span
-        class="box"></span>all days</label>
-      <label class="cbx"><input type=checkbox id="timeline_only"><span
-        class="box"></span>timeline only</label>
-      <label class="cbx"><input type=checkbox id="preview"><span
-        class="box"></span>previews</label></div>
-    <label class="f">Video range (e.g. C0357-C0380)</label>
-    <input id="video_range" type=text>
-    <div class="btnrow">
-      <button class="acc" id="runbtn" onclick="scan()">Run scan</button>
-      <button onclick="selftest()">Self&#8209;test</button>
-      <button onclick="outputs()">Outputs</button></div>
-    <div id="scanmsg" class="msg info"></div>
   </div></div>
 </div>
 
