@@ -36,7 +36,8 @@ recorder's clock is wrong, and writes a ready-made timeline.
 
 ## Requirements
 
-- Python 3.10+, `numpy`, `scipy` (`pip install -r requirements.txt`)
+- Python 3.10+, `numpy`, `scipy` (`pip install -r requirements.txt`,
+  or `pip install .` for the `wavesync`/`wavesync-gui` commands)
 - `ffmpeg` + `ffprobe` on PATH
 
 ## Layout
@@ -47,16 +48,34 @@ audio/lav/2026-08-14/*.wav           one folder per recorder per day
 audio/prop/2026-08-14/*.wav
 ```
 
-Day folder names must match between `video_root` and each mic folder
-(unless remapped via `day_map`).
+Day folder names should match between `video_root` and each mic folder
+(unless remapped via `day_map`). **But all of this is flexible**:
+
+- any video container ffmpeg reads (MOV, MXF, MTS, AVI, MKV, ...)
+- any audio format (WAV, BWF, MP3, FLAC, M4A, AIFF, OGG, OPUS, ...)
+- files may sit in nested folders (AVCHD `STREAM/`, recorder subdirs)
+- no day folders at all? A flat folder of clips + a flat folder of
+  audio works - the correlation doesn't need your filing system
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
-cp wavesync.config.example.json wavesync.config.json
-# edit wavesync.config.json: video_root, audio_root, work_dir, mics
+# autodetect: inspect the folders and write a config
+python wavesync.py --init --video-root /media/cam --audio-root /media/recs
+# or copy wavesync.config.example.json to wavesync.config.json by hand
 ```
+
+## GUI
+
+```bash
+python wavesync.py --gui        # or: python wavesync_gui.py
+```
+
+Opens a local web UI (127.0.0.1, stdlib only - no dependencies): pick
+folders in a browser dialog, auto-detect recorders, edit lanes/rolling
+flags, run scans with a live log, review matches and tick blocks,
+rebuild the timeline. Nothing leaves your machine.
 
 ## Usage
 
@@ -66,7 +85,10 @@ python wavesync.py all                     # every day folder
 python wavesync.py 2026-08-14 --video-range C0448-C0476
 python wavesync.py 2026-08-14 --only-video C0448.MP4
 python wavesync.py 2026-08-14 --timeline-only   # rebuild XML from report
+python wavesync.py 2026-08-14 --preview         # render check clips
 python wavesync.py --selftest              # sanity check, no config needed
+python wavesync.py --init --video-root V --audio-root A   # make config
+python wavesync.py --gui                   # local web UI
 ```
 
 Then import `work_dir/timelines/<DAY>.fcpxml` in Resolve
@@ -112,6 +134,8 @@ tags:
 | `analysis_filter` | FFmpeg `-af` applied to analysis decodes only |
 | `sample_rate` | analysis decode rate (default 8000) |
 | `min_r_timeline` | correlation floor for timeline placement |
+| `video_exts` | override the built-in video container list |
+| `audio_exts` | override the built-in audio format list |
 
 ## How it works (short version)
 
