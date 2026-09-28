@@ -150,11 +150,10 @@ def api_outputs(cfg_path: str):
     wd = work_dir_of(cfg_path)
     out = {"work_dir": str(wd), "timelines": [], "reports": [],
            "previews": []}
-    for name, key in (("timelines", "timelines"), ("reports", "reports"),
-                      ("previews", "previews")):
+    for name in ("timelines", "reports", "previews"):
         d = wd / name
         if d.is_dir():
-            out[key] = sorted(str(p) for p in d.rglob("*") if p.is_file())
+            out[name] = sorted(str(p) for p in d.rglob("*") if p.is_file())
     return out
 
 
@@ -206,16 +205,14 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/api/days":
                 self._json(api_days(q.get("root", "")))
             elif u.path == "/api/config":
-                cfg, err = load_cfg(q.get("path",
-                                          self.cfg_default))
+                cfg, err = load_cfg(q.get("path", self.cfg_default))
                 self._json({"exists": cfg is not None,
                             "config": cfg, "error": err})
             elif u.path == "/api/report":
                 self._json(api_report(q.get("config", self.cfg_default),
                                       q.get("day", "")))
             elif u.path == "/api/outputs":
-                self._json(api_outputs(q.get("config",
-                                             self.cfg_default)))
+                self._json(api_outputs(q.get("config", self.cfg_default)))
             elif u.path == "/api/jobs":
                 with JOBS_LOCK:
                     self._json({"jobs": [
@@ -314,294 +311,597 @@ INDEX_HTML = r"""<!doctype html>
 <title>wavesync</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-:root{--bg:#0d1117;--panel:#161b22;--edge:#2d333b;--fg:#e6edf3;
---dim:#8b949e;--acc:#4c8dff;--ok:#3fb950;--warn:#d29922;--bad:#f85149}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);
-font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
-h1{font-size:18px;padding:14px 20px;margin:0;border-bottom:1px solid var(--edge);
-display:flex;gap:10px;align-items:baseline}
-h1 span{color:var(--dim);font-size:12px}
-main{display:grid;grid-template-columns:380px 1fr;gap:14px;padding:14px 20px}
-.card{background:var(--panel);border:1px solid var(--edge);border-radius:8px;
-padding:14px;margin-bottom:14px}
-.card h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;
-letter-spacing:.06em;color:var(--dim)}
-label{display:block;font-size:12px;color:var(--dim);margin:8px 0 3px}
-input[type=text],select{width:100%;background:#0d1117;border:1px solid var(--edge);
-color:var(--fg);border-radius:6px;padding:7px 9px;font:13px ui-monospace,monospace}
-input[type=text]:focus{outline:none;border-color:var(--acc)}
-.row{display:flex;gap:8px}.row>*{flex:1}
-button{background:#21262d;border:1px solid var(--edge);color:var(--fg);
-border-radius:6px;padding:7px 12px;cursor:pointer;font-size:13px}
-button:hover{border-color:var(--acc)}
-button.acc{background:var(--acc);border-color:var(--acc);color:#fff}
-button:disabled{opacity:.45;cursor:default}
-table{width:100%;border-collapse:collapse;font-size:12.5px}
-th,td{text-align:left;padding:5px 7px;border-bottom:1px solid var(--edge);
-white-space:nowrap}
-th{color:var(--dim);font-weight:600}
-td input[type=text],td input[type=number]{width:100%;padding:3px 6px;
-font-size:12px;background:transparent;border:1px solid transparent}
-td input:focus{border-color:var(--acc)}
-#log{background:#010409;border:1px solid var(--edge);border-radius:8px;
-height:340px;overflow:auto;padding:10px 12px;font:12px/1.5 ui-monospace,monospace;
-white-space:pre-wrap}
-.muted{color:var(--dim)}.ok{color:var(--ok)}.warn{color:var(--warn)}
-.bad{color:var(--bad)}
-.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;
-border:1px solid var(--edge);color:var(--dim)}
-.pill.sel{border-color:var(--ok);color:var(--ok)}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;
-align-items:center;justify-content:center;z-index:9}
-.modal.open{display:flex}
-.modal .box{background:var(--panel);border:1px solid var(--edge);
-border-radius:10px;width:560px;max-height:70vh;display:flex;flex-direction:column}
-.modal .hd{padding:10px 14px;border-bottom:1px solid var(--edge);
-font:12px ui-monospace,monospace;color:var(--dim);word-break:break-all}
-.modal .ls{overflow:auto;padding:6px}
-.modal .ls div{padding:6px 10px;border-radius:6px;cursor:pointer}
-.modal .ls div:hover{background:#21262d}
-.modal .ft{padding:10px 14px;border-top:1px solid var(--edge);
-display:flex;gap:8px;justify-content:flex-end}
-.tag{font-size:11px;color:var(--warn)}
-</style></head><body>
-<h1>wavesync <span>external audio &rarr; camera sync &rarr; Resolve FCPXML</span>
-<span id="ver" class="muted" style="margin-left:auto"></span></h1>
-<main>
-<div>
-<div class="card"><h2>Project</h2>
-<label>Video root (day folders, or flat)</label>
-<div class="row"><input id="video_root" type=text placeholder="/media/camera">
-<button onclick="browse('video_root')">Browse</button></div>
-<label>Audio root (one folder per recorder, or flat)</label>
-<div class="row"><input id="audio_root" type=text placeholder="/media/recorders">
-<button onclick="browse('audio_root')">Browse</button></div>
-<label>Work dir (reports, timelines, cache)</label>
-<div class="row"><input id="work_dir" type=text placeholder="/media/_sync">
-<button onclick="browse('work_dir')">Browse</button></div>
-<label>Config file</label>
-<input id="cfg_path" type=text value="wavesync.config.json">
-<div class="row" style="margin-top:10px">
-<button class="acc" onclick="autodetect()">Auto-detect</button>
-<button onclick="loadCfg()">Load</button>
-<button onclick="saveCfg()">Save config</button></div>
-<div id="cfgmsg" class="muted" style="margin-top:8px"></div>
-</div>
-<div class="card"><h2>Recorders / mics</h2>
-<table id="mics"><thead><tr><th>name</th><th>folder</th><th>lane</th>
-<th>rolling</th><th></th></tr></thead><tbody></tbody></table>
-<button style="margin-top:8px" onclick="addMic()">+ add mic</button>
-<label>Analysis filter (ffmpeg -af)</label>
-<input id="analysis_filter" type=text value="dynaudnorm=f=250:g=15:m=25">
-<div class="row"><div><label>Sample rate</label>
-<input id="sample_rate" type=text value="8000"></div>
-<div><label>Min r (timeline)</label>
-<input id="min_r" type=text value="0.20"></div></div>
-<label>Skip dirs (comma separated)</label>
-<input id="skip_dirs" type=text>
-<label>Skip prefixes</label>
-<input id="skip_prefixes" type=text>
-</div>
-<div class="card"><h2>Scan</h2>
-<label>Day</label><select id="days" size="6"></select>
-<div class="row" style="margin-top:6px">
-<label style="flex:1"><input type=checkbox id="alldays"> all days</label>
-<label style="flex:1"><input type=checkbox id="timeline_only"> timeline only</label>
-<label style="flex:1"><input type=checkbox id="preview"> previews</label></div>
-<label>Video range (e.g. C0357-C0380, optional)</label>
-<input id="video_range" type=text>
-<div class="row" style="margin-top:10px">
-<button class="acc" onclick="scan()">Run scan</button>
-<button onclick="selftest()">Self-test</button>
-<button onclick="outputs()">Outputs</button></div>
-<div id="scanmsg" class="muted" style="margin-top:8px"></div>
-</div>
-</div>
-<div>
-<div class="card"><h2>Log <span id="jobstate" class="pill"></span></h2>
-<div id="log"><span class="muted">wavesync ready. Pick folders, Auto-detect, Run scan.</span></div></div>
-<div class="card"><h2>Matches <span id="repday" class="muted"></span></h2>
-<div class="row" style="margin-bottom:8px">
-<button onclick="loadReport()">Load report for selected day</button>
-<button onclick="saveBlocks()">Save blocks</button>
-<button onclick="scan(true)">Rebuild timeline</button></div>
-<div style="overflow:auto"><table id="rep"><thead><tr>
-<th>video</th><th>mic</th><th>audio file</th><th>shift</th><th>r</th>
-<th>covers</th><th>state</th><th>block</th></tr></thead><tbody>
-<tr><td colspan=8 class=muted>run a scan, then load the report</td></tr>
-</tbody></table></div></div>
-</div>
-</main>
-<div class="modal" id="modal"><div class="box">
-<div class="hd" id="mpath"></div><div class="ls" id="mlist"></div>
-<div class="ft"><button onclick="closeModal()">cancel</button>
-<button class="acc" onclick="pickHere()">select this folder</button></div>
-</div></div>
-<script>
-let CFG=null, JOB=null, JOBN=0, BLOCKS={};
-const $=id=>document.getElementById(id);
-async function api(path, body){
-  const opt=body?{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify(body)}:{};
-  const r=await fetch(path,opt); return r.json();}
-function say(el,msg,cls){$(el).textContent=msg;$(el).className=cls||'muted';}
-function log(line){const l=$('log');
-  l.insertAdjacentHTML('beforeend',line.replace(/&/g,'&amp;')
-  .replace(/</g,'&lt;')+'\n');l.scrollTop=l.scrollHeight;}
+/* Hallmark · redesign · genre: professional NLE tool · Resolve-adjacent
+ * pre-emit critique: P5 H4 E5 S4 R5 V4 */
+:root{
+  --bg:#141414; --panel:#1d1d1d; --panel2:#222222; --inset:#0f0f0f;
+  --edge:#0a0a0a; --edge-hi:#2e2e2e; --divider:#242424;
+  --fg:#d2d2d2; --dim:#8c8c8c; --faint:#585858;
+  --acc:#d9832b; --acc-hi:#f09a3e; --acc-dim:#7a4d1c;
+  --teal:#3d9b94; --red:#c05555;
+  --sel:#31404f; --sel-edge:#4a6a8a;
+  --sans:-apple-system,"Segoe UI",Inter,Roboto,system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font:12px/1.45 var(--sans);
+  -webkit-font-smoothing:antialiased;overflow:hidden;display:flex;
+  flex-direction:column}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:#383838;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:#4a4a4a}
 
+/* ---- top bar ---------------------------------------------------- */
+#topbar{height:38px;flex:0 0 auto;display:flex;align-items:center;
+  padding:0 12px;background:#191919;border-bottom:1px solid var(--edge);
+  gap:14px;user-select:none}
+#topbar .mark{display:flex;align-items:center;gap:8px}
+#topbar .mark svg{display:block}
+#topbar .name{font-weight:600;letter-spacing:.14em;font-size:11px;
+  text-transform:uppercase}
+#topbar .sub{color:var(--faint);font-size:10.5px;letter-spacing:.04em}
+#topbar .sp{flex:1}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;
+  padding:0 9px;border:1px solid var(--edge-hi);background:var(--panel2);
+  font:10px var(--mono);color:var(--dim);letter-spacing:.03em}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.dot.run{background:var(--acc);animation:pulse 1s infinite}
+.dot.ok{background:var(--teal)}
+.dot.err{background:var(--red)}
+@keyframes pulse{50%{opacity:.35}}
+
+/* ---- layout ------------------------------------------------------ */
+#body{flex:1;display:flex;min-height:0}
+#left{width:352px;flex:0 0 auto;overflow-y:auto;border-right:1px solid var(--edge);
+  background:var(--bg);padding:10px}
+#right{flex:1;display:flex;flex-direction:column;min-width:0}
+#logwrap{flex:1.15;min-height:120px;display:flex;flex-direction:column;
+  border-bottom:1px solid var(--edge)}
+#repwrap{flex:1;min-height:120px;display:flex;flex-direction:column}
+
+.panel{background:var(--panel);border:1px solid var(--edge);
+  border-top:1px solid var(--edge-hi);margin-bottom:10px}
+.panel>header{display:flex;align-items:center;justify-content:space-between;
+  padding:6px 10px;border-bottom:1px solid var(--divider);
+  font-size:10px;letter-spacing:.12em;color:var(--dim);
+  text-transform:uppercase;user-select:none}
+.panel>.body{padding:10px}
+
+label.f{display:block;font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--faint);margin:8px 0 3px}
+label.f:first-child{margin-top:0}
+
+input[type=text],input[type=number]{width:100%;height:24px;
+  background:var(--inset);border:1px solid var(--edge);
+  border-top-color:#000;color:var(--fg);padding:0 7px;
+  font:11px var(--mono);outline:none}
+input[type=text]:focus,input[type=number]:focus{border-color:var(--acc-dim);
+  box-shadow:inset 0 0 0 1px var(--acc-dim)}
+input::placeholder{color:var(--faint)}
+.igroup{display:flex}
+.igroup input{flex:1;min-width:0}
+.igroup button{border-left:none;border-radius:0}
+
+button{height:24px;padding:0 10px;background:#2b2b2b;
+  border:1px solid var(--edge);border-top-color:#383838;color:var(--fg);
+  font:11px var(--sans);cursor:pointer;border-radius:2px;
+  transition:background .08s,border-color .08s}
+button:hover:not(:disabled){background:#343434}
+button:active:not(:disabled){transform:scale(.98)}
+button:disabled{opacity:.4;cursor:default}
+button.acc{background:var(--acc);border-color:#8a4f14;color:#171006;
+  font-weight:600;letter-spacing:.02em}
+button.acc:hover:not(:disabled){background:var(--acc-hi)}
+button.ghost{background:transparent;border-color:transparent;
+  color:var(--dim)}
+button.ghost:hover:not(:disabled){color:var(--fg);background:#2b2b2b}
+.btnrow{display:flex;gap:6px;margin-top:10px}
+.btnrow>*{flex:1}
+
+/* checkboxes */
+.cbx{display:flex;align-items:center;gap:7px;font-size:11px;
+  color:var(--dim);cursor:pointer;user-select:none;padding:2px 0}
+.cbx input{display:none}
+.cbx .box{width:13px;height:13px;background:var(--inset);
+  border:1px solid #3a3a3a;display:inline-flex;align-items:center;
+  justify-content:center;flex:0 0 auto}
+.cbx input:checked+.box{background:var(--acc);border-color:var(--acc)}
+.cbx input:checked+.box::after{content:"";width:7px;height:4px;
+  border-left:2px solid #171006;border-bottom:2px solid #171006;
+  transform:rotate(-45deg) translateY(-1px)}
+.cbxrow{display:flex;gap:14px;margin-top:8px}
+
+/* mic table */
+table{border-collapse:collapse;width:100%}
+#mics th{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--faint);text-align:left;padding:4px 6px;
+  border-bottom:1px solid var(--divider);font-weight:600}
+#mics td{padding:3px 4px;border-bottom:1px solid #1a1a1a}
+#mics input[type=text],#mics input[type=number]{height:20px;
+  font-size:11px;background:transparent;border-color:transparent;
+  padding:0 4px}
+#mics input[type=text]:focus,#mics input[type=number]:focus{
+  background:var(--inset);border-color:var(--acc-dim);box-shadow:none}
+#mics tr:hover td{background:#232323}
+.lanechip{display:inline-block;width:9px;height:9px;margin-right:2px;
+  vertical-align:-1px}
+.xbtn{padding:0 6px;height:20px;font-size:11px;color:var(--faint);
+  background:transparent;border-color:transparent}
+.xbtn:hover{color:var(--red);background:transparent}
+
+/* day list */
+#daylist{border:1px solid var(--edge);background:var(--inset);
+  max-height:150px;overflow-y:auto}
+.drow{display:flex;align-items:center;padding:5px 8px;cursor:pointer;
+  border-bottom:1px solid #161616;font:11px var(--mono);color:var(--dim);
+  border-left:2px solid transparent;user-select:none}
+.drow:hover{background:#1c1c1c;color:var(--fg)}
+.drow.sel{background:var(--sel);color:#fff;border-left-color:var(--acc)}
+.drow .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drow .c{color:var(--faint);font-size:10px}
+.drow.sel .c{color:#9db4cc}
+.dempty{padding:8px;color:var(--faint);font:10.5px var(--sans)}
+
+/* console */
+#log{flex:1;overflow-y:auto;background:var(--inset);padding:8px 10px;
+  font:11px/1.55 var(--mono);color:#b8b8b8;white-space:pre-wrap;
+  word-break:break-all}
+#log .t{color:var(--faint)}
+#log .l-acc{color:var(--acc)}
+#log .l-bad{color:var(--red)}
+.panel .toolbar{display:flex;gap:4px}
+.panel .toolbar button{height:18px;padding:0 7px;font-size:10px}
+
+/* match table */
+#rep-scroll{flex:1;overflow:auto}
+#rep{font-size:11px}
+#rep thead th{position:sticky;top:0;background:#1a1a1a;z-index:2;
+  font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--faint);text-align:left;padding:6px 8px;font-weight:600;
+  border-bottom:1px solid var(--edge);white-space:nowrap}
+#rep td{padding:5px 8px;border-bottom:1px solid #1c1c1c;
+  white-space:nowrap;vertical-align:middle}
+#rep tr.mrow:hover td{background:#22262b}
+#rep td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;
+  text-align:right}
+#rep th.num{text-align:right}
+#rep td.name{font-family:var(--mono);font-size:10.5px}
+.vhead td{background:#181818;font-family:var(--mono);font-size:10.5px;
+  color:var(--dim);border-bottom:1px solid var(--divider);
+  border-top:1px solid #2a2a2a;padding:6px 8px;letter-spacing:.02em}
+.vhead .vd{float:right;color:var(--faint)}
+.pill{display:inline-block;height:16px;line-height:16px;padding:0 6px;
+  font-size:9px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid #3a3a3a;color:var(--dim)}
+.pill.sel{color:var(--teal);border-color:#2c5a56}
+.pill.review{color:var(--acc);border-color:var(--acc-dim)}
+.pill.blocked{color:var(--faint);text-decoration:line-through}
+.tag-time{color:var(--red);font-size:9px;letter-spacing:.08em;
+  margin-left:5px}
+.empty{color:var(--faint);padding:14px;font-size:11px}
+.msg{font-size:10.5px;min-height:14px;margin-top:7px}
+.msg.err{color:var(--red)}.msg.ok{color:var(--teal)}.msg.info{color:var(--dim)}
+
+/* status bar */
+#statusbar{height:22px;flex:0 0 auto;display:flex;align-items:center;
+  gap:16px;padding:0 12px;background:#191919;
+  border-top:1px solid var(--edge);font:10px var(--mono);
+  color:var(--faint);user-select:none}
+#statusbar .st{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#statusbar .right{margin-left:auto;display:flex;gap:16px}
+
+/* modal */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;
+  align-items:center;justify-content:center;z-index:9}
+.modal.open{display:flex}
+.modal .box{background:#1c1c1c;border:1px solid var(--edge);
+  border-top:1px solid var(--edge-hi);width:520px;max-height:64vh;
+  display:flex;flex-direction:column}
+.modal .hd{padding:7px 10px;border-bottom:1px solid var(--divider);
+  font:10.5px var(--mono);color:var(--dim);word-break:break-all;
+  background:#191919}
+.modal .ls{overflow-y:auto;padding:3px}
+.modal .ls .drow{font-size:11.5px;border-left:none;padding:6px 9px}
+.modal .ft{padding:8px 10px;border-top:1px solid var(--divider);
+  display:flex;gap:8px;justify-content:flex-end;background:#191919}
+</style></head><body>
+
+<div id="topbar">
+  <div class="mark">
+    <svg width="17" height="17" viewBox="0 0 17 17"><g fill="none"
+      stroke="#d9832b" stroke-width="1.4" stroke-linecap="round">
+      <path d="M2 8.5h2M13 8.5h2"/>
+      <path d="M5.5 5v7M8.5 2.5v12M11.5 5v7"/></g></svg>
+    <span class="name">wavesync</span>
+    <span class="sub">RECORDER &rarr; CAMERA &rarr; RESOLVE</span>
+  </div>
+  <div class="sp"></div>
+  <span class="chip"><span id="jobdot" class="dot"></span>
+    <span id="jobstate">idle</span></span>
+  <span class="chip" id="ver">v0.2.0</span>
+</div>
+
+<div id="body">
+<div id="left">
+
+  <div class="panel"><header>Project</header><div class="body">
+    <label class="f">Video root</label>
+    <div class="igroup"><input id="video_root" type=text
+      placeholder="/media/camera"><button
+      onclick="browse('video_root')">Browse</button></div>
+    <label class="f">Audio root &mdash; one folder per recorder</label>
+    <div class="igroup"><input id="audio_root" type=text
+      placeholder="/media/recorders"><button
+      onclick="browse('audio_root')">Browse</button></div>
+    <label class="f">Work dir</label>
+    <div class="igroup"><input id="work_dir" type=text
+      placeholder="./_wavesync"><button
+      onclick="browse('work_dir')">Browse</button></div>
+    <label class="f">Config file</label>
+    <input id="cfg_path" type=text value="wavesync.config.json">
+    <div class="btnrow">
+      <button class="acc" onclick="autodetect()">Auto&#8209;detect</button>
+      <button onclick="loadCfg()">Load</button>
+      <button onclick="saveCfg()">Save</button></div>
+    <div id="cfgmsg" class="msg info"></div>
+  </div></div>
+
+  <div class="panel"><header>Recorders / mics</header><div class="body">
+    <table id="mics"><thead><tr>
+      <th>name</th><th>folder</th><th style="width:44px">lane</th>
+      <th style="width:42px">roll</th><th style="width:24px"></th>
+    </tr></thead><tbody></tbody></table>
+    <div class="btnrow"><button class="ghost"
+      onclick="addMic()">+ add mic</button></div>
+    <label class="f">Analysis filter (ffmpeg -af)</label>
+    <input id="analysis_filter" type=text value="dynaudnorm=f=250:g=15:m=25">
+    <div style="display:flex;gap:8px">
+      <div style="flex:1"><label class="f">Sample rate</label>
+        <input id="sample_rate" type=number value="8000"></div>
+      <div style="flex:1"><label class="f">Min r (timeline)</label>
+        <input id="min_r" type=text value="0.20"></div></div>
+    <label class="f">Skip dirs</label>
+    <input id="skip_dirs" type=text>
+    <label class="f">Skip prefixes</label>
+    <input id="skip_prefixes" type=text>
+  </div></div>
+
+  <div class="panel"><header>Scan</header><div class="body">
+    <label class="f">Day folder</label>
+    <div id="daylist"><div class="dempty">no video root set</div></div>
+    <div class="cbxrow">
+      <label class="cbx"><input type=checkbox id="alldays"><span
+        class="box"></span>all days</label>
+      <label class="cbx"><input type=checkbox id="timeline_only"><span
+        class="box"></span>timeline only</label>
+      <label class="cbx"><input type=checkbox id="preview"><span
+        class="box"></span>previews</label></div>
+    <label class="f">Video range (e.g. C0357-C0380)</label>
+    <input id="video_range" type=text>
+    <div class="btnrow">
+      <button class="acc" id="runbtn" onclick="scan()">Run scan</button>
+      <button onclick="selftest()">Self&#8209;test</button>
+      <button onclick="outputs()">Outputs</button></div>
+    <div id="scanmsg" class="msg info"></div>
+  </div></div>
+</div>
+
+<div id="right">
+  <div id="logwrap" class="panel" style="margin:0;border-left:none;
+    border-top:none;display:flex;flex-direction:column">
+    <header>Console
+      <span class="toolbar"><button class="ghost"
+        onclick="clearLog()">clear</button></span></header>
+    <div id="log"><div><span class="t">[--:--:--]</span> wavesync ready.
+      Set roots, Auto-detect, Run scan.</div></div>
+  </div>
+  <div id="repwrap" class="panel" style="margin:0;border-left:none;
+    border-bottom:none;display:flex;flex-direction:column;flex:1">
+    <header>Matches <span id="repday"
+      style="letter-spacing:.02em;text-transform:none"></span>
+      <span class="toolbar">
+        <button onclick="loadReport()">Load report</button>
+        <button onclick="saveBlocks()">Save blocks</button>
+        <button onclick="scan(true)">Rebuild timeline</button>
+      </span></header>
+    <div id="rep-scroll"><table id="rep"><thead><tr>
+      <th>audio file</th><th>mic</th><th class="num">shift s</th>
+      <th class="num">r</th><th>covers</th><th>state</th>
+      <th style="width:40px">block</th></tr></thead>
+      <tbody><tr><td colspan=7 class="empty">
+        Run a scan, then load the report for the day.</td></tr></tbody>
+    </table></div>
+  </div>
+</div>
+</div>
+
+<div id="statusbar">
+  <span class="st" id="stmsg">ready</span>
+  <span class="right"><span id="stcfg"></span>
+    <span>127.0.0.1 &middot; local only</span></span>
+</div>
+
+<div class="modal" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="box">
+    <div class="hd" id="mpath"></div>
+    <div class="ls" id="mlist"></div>
+    <div class="ft"><button onclick="closeModal()">Cancel</button>
+      <button class="acc" onclick="pickHere()">Select this folder</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let CFG=null, JOB=null, JOBN=0, BLOCKS={}, CURDAY="", LANECOL={};
+const $=id=>document.getElementById(id);
+const LC=["#c05555","#3d9b94","#4a6a8a","#8a6a3d","#7a5a9a","#4d7a3d"];
+
+async function api(path,body){
+  const opt=body?{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)}:{};
+  const r=await fetch(path,opt);return r.json();}
+function msg(el,txt,cls){$(el).textContent=txt;$(el).className='msg '+(cls||'info');}
+function stamp(){const d=new Date();return '['+
+  String(d.getHours()).padStart(2,'0')+':'+
+  String(d.getMinutes()).padStart(2,'0')+':'+
+  String(d.getSeconds()).padStart(2,'0')+']';}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function log(line,cls){
+  const l=$('log'),d=document.createElement('div');
+  d.innerHTML='<span class="t">'+stamp()+'</span> '+
+    '<span class="'+(cls||'')+'">'+esc(line)+'</span>';
+  l.appendChild(d);l.scrollTop=l.scrollHeight;}
+function clearLog(){$('log').innerHTML='';}
+function status(t){$('stmsg').textContent=t;}
+
+/* ---- persistence ---- */
+const PKEY='wavesync.ui';
+function persist(){const o={};
+  ['video_root','audio_root','work_dir','cfg_path','analysis_filter',
+   'sample_rate','min_r','skip_dirs','skip_prefixes']
+   .forEach(id=>o[id]=$(id).value);
+  localStorage.setItem(PKEY,JSON.stringify(o));}
+function restore(){try{const o=JSON.parse(localStorage.getItem(PKEY)||'{}');
+  Object.entries(o).forEach(([k,v])=>{if($(k))$(k).value=v;});
+  }catch(e){}}
+['video_root','audio_root','work_dir','cfg_path'].forEach(id=>{});
+setInterval(()=>{if(CFG)persist()},2000);
+
+/* ---- folder picker ---- */
 let BTARGET=null;
-async function browse(target){
-  BTARGET=target;const cur=$(target).value||'';
-  openModal(cur);}
+async function browse(t){BTARGET=t;openModal($(t).value||'');}
 async function openModal(path){
   const r=await api('/api/browse?path='+encodeURIComponent(path));
   $('modal').classList.add('open');
-  if(r.error){$('mlist').innerHTML='<div class=bad>'+r.error+'</div>';
-    $('mpath').textContent=path||'/';return;}
-  $('mpath').textContent=r.path||'/';
+  if(r.error){$('mlist').innerHTML='<div class="dempty">'+esc(r.error)
+    +'</div>';$('mpath').textContent=path||'/';return;}
+  $('mpath').textContent=r.path||'(drives)';
   let h='';
   if(r.parent&&r.parent!==r.path)
-    h+='<div onclick="openModal(\''+esc(r.parent)+'\')">.. (up)</div>';
+    h+='<div class="drow" onclick="openModal(\''+jsq(r.parent)+'\')">'+
+       '<span class="n">&#129048; up</span></div>';
   for(const d of r.dirs)
-    h+='<div onclick="openModal(\''+esc(d.path)+'\')">'+d.name+'/'+
-       (d.media?' <span class=muted>· '+d.media+' media</span>':'')+'</div>';
-  if(!r.dirs.length)h+='<div class=muted>(no subfolders)</div>';
-  $('mlist').innerHTML=h;}
-function esc(s){return s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
-function pickHere(){if(BTARGET)$(BTARGET).value=$('mpath').textContent;
-  closeModal();refreshDays();}
+    h+='<div class="drow" onclick="openModal(\''+jsq(d.path)+'\')">'+
+       '<span class="n">'+esc(d.name)+'/</span>'+
+       (d.media?'<span class="c">'+d.media+'</span>':'')+'</div>';
+  if(!r.dirs.length)h+='<div class="dempty">no subfolders</div>';
+  $('mlist').innerHTML=h;$('mlist').scrollTop=0;}
+function jsq(s){return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
+function pickHere(){if(BTARGET){$(BTARGET).value=$('mpath').textContent;
+  persist();}closeModal();refreshDays();}
 function closeModal(){$('modal').classList.remove('open');}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape')closeModal();});
 
+/* ---- config ---- */
 function collectCfg(){
   const mics={};
   document.querySelectorAll('#mics tbody tr').forEach(tr=>{
     const t=tr.querySelectorAll('input');
-    if(t[0].value)mics[t[0].value]={folder:t[1].value||t[0].value,
+    const n=t[0].value.trim();if(!n)return;
+    mics[n]={folder:t[1].value.trim()||n,
       lane:parseInt(t[2].value)||-1,rolling:t[3].checked};});
-  return {video_root:$('video_root').value,audio_root:$('audio_root').value,
-    work_dir:$('work_dir').value||'./_wavesync',mics:mics,
-    skip_dirs:$('skip_dirs').value.split(',').map(s=>s.trim()).filter(Boolean),
-    skip_prefixes:$('skip_prefixes').value.split(',')
-      .map(s=>s.trim()).filter(Boolean),
-    analysis_filter:$('analysis_filter').value,
+  return {video_root:$('video_root').value.trim(),
+    audio_root:$('audio_root').value.trim(),
+    work_dir:$('work_dir').value.trim()||'./_wavesync',
+    mics:mics,
+    skip_dirs:csv('skip_dirs'),skip_prefixes:csv('skip_prefixes'),
+    analysis_filter:$('analysis_filter').value.trim(),
     sample_rate:parseInt($('sample_rate').value)||8000,
     min_r_timeline:parseFloat($('min_r').value)||0.2};}
+function csv(id){return $(id).value.split(',').map(s=>s.trim())
+  .filter(Boolean);}
 function fillCfg(c){
-  $('video_root').value=c.video_root||'';$('audio_root').value=c.audio_root||'';
+  $('video_root').value=c.video_root||'';
+  $('audio_root').value=c.audio_root||'';
   $('work_dir').value=c.work_dir||'';
   $('analysis_filter').value=c.analysis_filter||'dynaudnorm=f=250:g=15:m=25';
   $('sample_rate').value=c.sample_rate||8000;
   $('min_r').value=c.min_r_timeline??0.2;
   $('skip_dirs').value=(c.skip_dirs||[]).join(', ');
   $('skip_prefixes').value=(c.skip_prefixes||[]).join(', ');
-  const tb=document.querySelector('#mics tbody');tb.innerHTML='';
+  document.querySelector('#mics tbody').innerHTML='';
   Object.entries(c.mics||{}).forEach(([n,m])=>addMic(n,m));
+  $('stcfg').textContent=$('cfg_path').value;
   refreshDays();}
+function laneColor(lane){if(!(lane in LANECOL))
+  LANECOL[lane]=LC[(-lane-1)%LC.length];return LANECOL[lane];}
 function addMic(n,m){n=n||'';m=m||{};
   const tr=document.createElement('tr');
-  tr.innerHTML='<td><input type=text value="'+n+'"></td>'+
-   '<td><input type=text value="'+(m.folder||n)+'"></td>'+
-   '<td><input type=text size=3 value="'+(m.lane??-1)+'"></td>'+
-   '<td><input type=checkbox '+(m.rolling?'checked':'')+'></td>'+
-   '<td><button onclick="this.closest(\'tr\').remove()">x</button></td>';
+  const lane=m.lane??-1;
+  tr.innerHTML='<td><input type=text value="'+esc(n)+'"></td>'+
+   '<td><input type=text value="'+esc(m.folder||n)+'"></td>'+
+   '<td><span class="lanechip" style="background:'+laneColor(lane)+
+   '"></span><input type=number value="'+lane+
+   '" style="width:38px;display:inline-block" oninput="'+
+   "this.previousElementSibling.style.background=laneColor(this.value)"+
+   '"></td>'+
+   '<td><label class="cbx" style="padding:0"><input type=checkbox '+
+   (m.rolling?'checked':'')+'><span class="box"></span></label></td>'+
+   '<td><button class="xbtn" onclick="this.closest(\'tr\').remove()">'+
+   '&times;</button></td>';
   document.querySelector('#mics tbody').appendChild(tr);}
 
 async function autodetect(){
-  const v=$('video_root').value,a=$('audio_root').value;
-  if(!v||!a){say('cfgmsg','set video + audio roots first','warn');return;}
-  say('cfgmsg','detecting...');
+  const v=$('video_root').value.trim(),a=$('audio_root').value.trim();
+  if(!v||!a){msg('cfgmsg','set video + audio roots first','err');return;}
+  msg('cfgmsg','detecting…');
   const r=await api('/api/autodetect',{video_root:v,audio_root:a,
-    work_dir:$('work_dir').value});
-  if(r.error){say('cfgmsg',r.error,'bad');return;}
-  CFG=r.config;fillCfg(CFG);
-  say('cfgmsg','detected '+Object.keys(CFG.mics).length+' mic(s)','ok');}
+    work_dir:$('work_dir').value.trim()});
+  if(r.error){msg('cfgmsg',r.error,'err');return;}
+  CFG=r.config;fillCfg(CFG);persist();
+  const n=Object.keys(CFG.mics).length;
+  msg('cfgmsg','detected '+n+' mic'+(n===1?'':'s'),'ok');
+  log('autodetect: '+n+' mic(s): '+Object.keys(CFG.mics).join(', '));}
 async function loadCfg(){
-  const r=await api('/api/config?path='+encodeURIComponent($('cfg_path').value));
-  if(r.config){CFG=r.config;fillCfg(CFG);say('cfgmsg','loaded','ok');}
-  else say('cfgmsg',r.error||'no config yet - Auto-detect makes one','warn');}
+  const r=await api('/api/config?path='+encodeURIComponent(
+    $('cfg_path').value));
+  if(r.config){CFG=r.config;fillCfg(CFG);
+    msg('cfgmsg','loaded '+$('cfg_path').value,'ok');}
+  else msg('cfgmsg',r.error||'no config yet','err');}
 async function saveCfg(){
   CFG=collectCfg();
-  const r=await api('/api/save_config',{path:$('cfg_path').value,config:CFG});
-  say('cfgmsg',r.error||'saved '+r.saved,r.error?'bad':'ok');}
-async function refreshDays(){
-  const r=await api('/api/days?root='+encodeURIComponent($('video_root').value));
-  const sel=$('days');sel.innerHTML='';
-  for(const d of r.days){const o=document.createElement('option');
-    o.value=d;o.textContent=d+' ('+(r.counts[d]||0)+' clips)';
-    sel.appendChild(o);}
-  if(r.flat){const o=document.createElement('option');
-    o.value=r.flat_day;o.textContent=r.flat_day+' (flat folder)';
-    sel.appendChild(o);}}
+  const r=await api('/api/save_config',{path:$('cfg_path').value,
+    config:CFG});persist();
+  msg('cfgmsg',r.error||('saved '+r.saved),r.error?'err':'ok');}
 
+/* ---- days ---- */
+async function refreshDays(){
+  const r=await api('/api/days?root='+encodeURIComponent(
+    $('video_root').value.trim()));
+  const el=$('daylist');el.innerHTML='';CURDAY='';
+  const add=(val,label,count)=>{
+    const d=document.createElement('div');
+    d.className='drow';d.dataset.v=val;
+    d.innerHTML='<span class="n">'+esc(label)+'</span>'+
+      (count!=null?'<span class="c">'+count+' clips</span>':'');
+    d.onclick=()=>{document.querySelectorAll('.drow.sel')
+      .forEach(x=>x.classList.remove('sel'));
+      d.classList.add('sel');CURDAY=val;};
+    el.appendChild(d);};
+  (r.days||[]).forEach(d=>add(d,d,r.counts[d]));
+  if(r.flat)add(r.flat_day,r.flat_day+'  (flat)',null);
+  if(!(r.days||[]).length&&!r.flat)
+    el.innerHTML='<div class="dempty">no day folders found</div>';
+  if(el.children.length){el.children[0].classList.add('sel');
+    CURDAY=el.children[0].dataset.v;}}
+
+/* ---- jobs ---- */
+function setRunning(on){
+  $('runbtn').disabled=on;
+  $('jobdot').className='dot '+(on?'run':'');
+  $('jobstate').textContent=on?'running':'idle';}
 async function scan(tlOnly){
-  CFG=collectCfg();
-  const day=$('alldays').checked?'all':($('days').value||'all');
+  if(JOB&&!JOB.done){log('a job is already running','l-acc');return;}
+  CFG=collectCfg();persist();
+  const all=$('alldays').checked;
+  const day=all?'all':(CURDAY||'all');
   const body={config_path:$('cfg_path').value,config:CFG,day:day,
     timeline_only:tlOnly||$('timeline_only').checked,
-    preview:$('preview').checked,video_range:$('video_range').value};
-  say('scanmsg','starting...');
+    preview:$('preview').checked,video_range:$('video_range').value.trim()};
+  msg('scanmsg','starting…');
   const r=await api('/api/scan',body);
-  if(r.error){say('scanmsg',r.error,'bad');return;}
-  JOB=r.job;JOBN=0;$('log').innerHTML='';
-  say('scanmsg','job '+r.job+': '+r.cmd,'muted');poll();}
+  if(r.error){msg('scanmsg',r.error,'err');return;}
+  JOB={id:r.job,done:false,day:day};JOBN=0;clearLog();
+  log('$ '+r.cmd,'l-acc');setRunning(true);
+  status('job '+r.job+' running');poll();}
 async function selftest(){
   const r=await api('/api/scan',{selftest:true});
-  JOB=r.job;JOBN=0;$('log').innerHTML='';poll();}
+  JOB={id:r.job,done:false,day:null};JOBN=0;clearLog();
+  log('$ '+r.cmd,'l-acc');setRunning(true);poll();}
 async function poll(){
   if(!JOB)return;
-  const r=await api('/api/job?id='+JOB+'&since='+JOBN);
-  (r.lines||[]).forEach(log);JOBN=r.n;
-  $('jobstate').textContent=r.done?('exit '+r.code):'running';
-  $('jobstate').className='pill '+(r.done&&r.code===0?'sel':'');
-  if(!r.done)setTimeout(poll,600);
-  else say('scanmsg',r.code===0?'done':'failed (exit '+r.code+')',
-           r.code===0?'ok':'bad');}
-async function loadReport(){
-  const d=[...$('days').selectedOptions].map(o=>o.value)[0]||
-    $('days').options[0]&&$('days').options[0].value;
-  if(!d){say('scanmsg','pick a day first','warn');return;}
-  const r=await api('/api/report?config='+encodeURIComponent($('cfg_path').value)
-    +'&day='+encodeURIComponent(d));
-  if(r.error){say('scanmsg',r.error,'warn');return;}
-  $('repday').textContent='· '+d;BLOCKS=r.blocks||{};
+  const r=await api('/api/job?id='+JOB.id+'&since='+JOBN);
+  (r.lines||[]).forEach(l=>log(l));JOBN=r.n;
+  JOB.done=r.done;
+  if(!r.done){setTimeout(poll,600);return;}
+  setRunning(false);
+  const ok=r.code===0;
+  $('jobdot').className='dot '+(ok?'ok':'err');
+  $('jobstate').textContent=ok?'done':'exit '+r.code;
+  status('job '+JOB.id+' '+(ok?'finished':'failed, exit '+r.code));
+  msg('scanmsg',ok?'done':'failed (exit '+r.code+')',ok?'ok':'err');
+  if(ok&&JOB.day&&JOB.day!=='all'&&!$('timeline_only').checked)
+    loadReport(JOB.day);}
+
+/* ---- report / blocks ---- */
+async function loadReport(day){
+  const d=day||CURDAY;
+  if(!d){msg('scanmsg','pick a day first','err');return;}
+  const r=await api('/api/report?config='+encodeURIComponent(
+    $('cfg_path').value)+'&day='+encodeURIComponent(d));
+  if(r.error){msg('scanmsg',r.error,'err');return;}
+  CURDAY=d;$('repday').textContent='· '+d;BLOCKS=r.blocks||{};
   const tb=document.querySelector('#rep tbody');tb.innerHTML='';
+  let nsel=0,ntot=0;
   for(const row of r.rows){
     const vb=BLOCKS[row.video]||[];
-    if(!row.matches.length){tb.insertAdjacentHTML('beforeend',
-      '<tr><td>'+row.video+'</td><td colspan=6 class=muted>no match</td>'+
-      blkCell(row.video,'*',vb.includes('*'))+'</tr>');continue;}
+    const hd=document.createElement('tr');hd.className='vhead';
+    hd.innerHTML='<td colspan=7>'+esc(row.video)+
+      '<span class="vd">'+row.dur.toFixed(1)+'s</span></td>';
+    tb.appendChild(hd);
+    if(!row.matches.length){
+      const tr=document.createElement('tr');tr.className='mrow';
+      tr.innerHTML='<td class="name" colspan=5>'+
+        '<span class="empty">no match</span></td>'+
+        '<td><span class="pill">cam only</span></td>'+
+        '<td>'+cbxHtml(row.video,'*',vb.includes('*'))+'</td>';
+      tb.appendChild(tr);continue;}
     for(const m of row.matches){
+      ntot++;if(m.selected)nsel++;
       const base=(m.wav_name||'').replace(/ \[(CONT|GUESS)\]$/,'');
-      const st=m.selected?'<span class="pill sel">selected</span>'
-        :'<span class=pill>'+(m.nominated||'rejected')+'</span>';
-      tb.insertAdjacentHTML('beforeend','<tr><td>'+row.video+'</td><td>'
-        +(m.mic||'')+'</td><td>'+(m.wav_name||'')+'</td><td>'
-        +(m.shift_sec!=null?m.shift_sec.toFixed(2)+'s':'')+'</td><td>'
-        +(m.r_med!=null?m.r_med.toFixed(2):'')+'</td><td>'
-        +(m.cov_a!=null?Math.round(m.cov_a)+'-'+Math.round(m.cov_b)+'s':'')
-        +'</td><td>'+st+(m.time_ok===false?' <span class=tag>TIME</span>':'')
-        +'</td>'+blkCell(row.video,m.wav_name,vb.includes(base))+'</tr>');}}}
-function blkCell(video,wav,checked){
-  return '<td><input type=checkbox data-v="'+video+'" data-w="'+wav+'"'
-    +(checked?' checked':'')+'></td>';}
+      const blocked=vb.includes(base);
+      const st=m.selected&&!blocked
+        ?(m.nominated==='continuity'
+          ?'<span class="pill review">CONT</span>'
+          :'<span class="pill sel">selected</span>')
+        :'<span class="pill blocked">'+(m.nominated||'rejected')+'</span>';
+      const cov=(m.cov_a!=null)
+        ?Math.round(m.cov_a)+'&ndash;'+Math.round(m.cov_b)+'s':'';
+      const tr=document.createElement('tr');tr.className='mrow';
+      tr.innerHTML='<td class="name">'+esc(m.wav_name||'')+'</td>'+
+        '<td><span class="lanechip" style="background:'+
+          laneColor(((CFG.mics||{})[m.mic]||{}).lane??-1)+'"></span>'+
+          esc(m.mic||'')+'</td>'+
+        '<td class="num">'+(m.shift_sec!=null?m.shift_sec.toFixed(2):'')+
+        '</td>'+
+        '<td class="num">'+(m.r_med!=null?m.r_med.toFixed(2):'')+'</td>'+
+        '<td class="num" style="text-align:left;color:var(--dim)">'+cov+
+        '</td>'+
+        '<td>'+st+(m.time_ok===false?
+          '<span class="tag-time">TIME</span>':'')+'</td>'+
+        '<td>'+cbxHtml(row.video,m.wav_name,blocked)+'</td>';
+      tb.appendChild(tr);}}
+  status('report '+d+': '+nsel+'/'+ntot+' matches selected');}
+function cbxHtml(v,w,on){
+  return '<label class="cbx" style="padding:0"><input type=checkbox data-v="'+
+    esc(v)+'" data-w="'+esc(w)+'"'+(on?' checked':'')+
+    '><span class="box"></span></label>';}
 async function saveBlocks(){
   const d=$('repday').textContent.replace('· ','').trim();
-  if(!d)return;
+  if(!d){msg('scanmsg','load a report first','err');return;}
   const blocks={};
   document.querySelectorAll('#rep input[type=checkbox]:checked')
     .forEach(cb=>{(blocks[cb.dataset.v]=blocks[cb.dataset.v]||[])
       .push(cb.dataset.w);});
   const r=await api('/api/blocks',{config:$('cfg_path').value,day:d,
     blocks:blocks});
-  say('scanmsg',r.error||('blocks saved - rebuild timeline to apply'),
-    r.error?'bad':'ok');}
+  msg('scanmsg',r.error||'blocks saved - rebuild to apply',
+    r.error?'err':'ok');
+  log('blocks saved for '+d);}
 async function outputs(){
-  const r=await api('/api/outputs?config='+encodeURIComponent($('cfg_path').value));
+  const r=await api('/api/outputs?config='+encodeURIComponent(
+    $('cfg_path').value));
   log('work_dir: '+r.work_dir);
-  (r.timelines||[]).forEach(t=>log('  timeline: '+t));
-  (r.reports||[]).forEach(t=>log('  report:   '+t));}
+  (r.timelines||[]).forEach(t=>log('  timeline  '+t));
+  (r.reports||[]).forEach(t=>log('  report    '+t));}
+
 $('video_root').addEventListener('change',refreshDays);
-loadCfg();
+restore();loadCfg();
 </script></body></html>
 """
 

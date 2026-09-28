@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Web UI restyle: dense NLE-grade layout (Resolve-inspired), timestamped
+  console, grouped match table with lane colors, status bar, persistent
+  field values, run-locking, auto-loads the report after a scan.
+
 ## 0.2.0 - 2026-09-28
 
 ### Added
