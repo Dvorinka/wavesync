@@ -1,46 +1,124 @@
-# wavesync
+<p align="center">
+  <img src="docs/icon.svg" alt="wavesync" width="120">
+</p>
 
-Sync external audio recorder files to camera footage automatically, and get
-an **FCPXML timeline you can import straight into DaVinci Resolve** — camera
-audio intact, each recorder on its own track, everything at its true position.
+<h1 align="center">wavesync</h1>
 
-Built for the classic headache: a shoot where the camera rolls in takes while
-lavs and prop mics start, stop, and restart independently. Instead of syncing
-hundreds of clips by hand, wavesync finds which WAV covers each video by
-waveform correlation, reconstructs continuous recorder sessions even when the
-recorder's clock is wrong, and writes a ready-made timeline.
+<p align="center">
+  Sync external recorder audio to camera footage automatically.<br>
+  Waveform correlation in, an FCPXML timeline for DaVinci Resolve out —
+  every clip at its true position, each recorder on its own track.
+</p>
 
-## What it does
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="#web-ui">Web UI</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-- **Waveform matching** — two stages: onset-envelope correlation nominates
-  candidates, then raw-waveform Pearson probes at energetic moments
-  (clapperboards, door slams) verify them.
-- **Broken-clock tolerant** — recorders with unset or wildly-wrong clocks
-  (files stamped 1999 or 2029) still match; file timestamps are only used
-  when they're sane.
-- **Rolling sessions** — a recorder that stays on through several takes is
-  detected as one file spanning multiple videos, and placed as multiple
-  references into the same WAV at different offsets.
-- **Quiet audio** — analysis decodes run through FFmpeg `dynaudnorm`, so
-  whisper-level lav audio correlates. Source files are never modified.
+<p align="center">
+  <a href="https://github.com/Dvorinka/wavesync/actions/workflows/ci.yml"><img src="https://github.com/Dvorinka/wavesync/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
+  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/deps-numpy%20%2B%20scipy%20%2B%20ffmpeg-lightgrey" alt="deps">
+</p>
+
+## What is wavesync?
+
+wavesync solves the classic field-recording headache: the camera rolls in
+takes while lavs and prop mics start, stop, and restart on their own clocks.
+Instead of syncing hundreds of clips by hand, wavesync finds which recording
+covers each video by waveform correlation, reconstructs continuous recorder
+sessions even when a recorder's clock is wildly wrong, and writes a timeline
+Resolve imports directly — camera audio intact underneath.
+
+![wavesync web UI](docs/screenshots/gui.png)
+
+## Features
+
+- **Two-stage waveform matching** — spectral-flux onset envelopes nominate
+  candidates at speed; raw-waveform Pearson probes at energetic moments
+  (clapperboards, door slams) verify them for real.
+- **Every camera, every file** — any container ffprobe reads: MOV, MXF, MTS,
+  MP4, AVI, MKV… for video; WAV, BWF, MP3, FLAC, M4A, AIFF, OGG, OPUS… for
+  audio. Nested card dumps (AVCHD `STREAM/` and friends) are traversed.
+- **Broken-clock tolerant** — files stamped 1999 or 2029 still match;
+  timestamps are used only when they are sane.
+- **Rolling sessions** — a recorder left running through several takes is
+  detected as one file spanning multiple clips, referenced at true offsets.
 - **Playback-echo rejection** — in-scene playback re-records earlier takes;
-  temporal-consistency + coverage checks keep the real file and drop echoes.
-- **True positions, real gaps** — clips never shift to fit. If two recordings
-  genuinely overlap, the later one drops to a lower lane.
-- **Camera fallback** — clips with no external match keep their camera audio.
-- **Orphan parking** — WAVs recorded during a take that didn't match get
-  parked on a spare lane at their true position; everything else lands in the
-  project bin (imported, off the timeline).
-- **Manual overrides that stick** — `reports/<DAY>_blocks.json` holds your
-  corrections; regenerating never resurrects rejected clips.
+  temporal-consistency and coverage checks keep the real file.
+- **Quiet audio** — analysis decodes run through `dynaudnorm`, so
+  whisper-level lavs correlate. Source files are never modified.
+- **True positions, real gaps** — clips never shift to fit; genuine overlaps
+  drop to a lower lane.
+- **Continuity fill** — `[CONT]` markers where a proven rolling recorder was
+  demonstrably running but too quiet to verify.
+- **Orphan parking** — audio recorded during a take that didn't match gets
+  parked on a spare lane; the rest lands in the project bin.
+- **Corrections that stick** — `reports/<DAY>_blocks.json` survives
+  regeneration; rejected matches never resurrect.
+- **Zero-dependency web UI** — folder picking, autodetect, live scan logs,
+  match review and blocks, all local to `127.0.0.1`.
+
+## How it works
+
+```
+camera clip A001.MOV ──┐
+                      ├─▶ decode mono @8kHz (dynaudnorm, cached)
+recorder rec_001.WAV ─┘        │
+                               ▼
+              1. onset-envelope cross-correlation ──▶ candidates
+                               │
+                               ▼
+              2. raw Pearson probes at energy peaks ──▶ verify shift
+                               │        coverage sweep measures cov_a–cov_b
+                               ▼
+              3. per-mic coverage selection ──▶ drop dupes & echoes
+              4. file-consistency pass ──▶ one file = one real window
+              5. continuity fill for proven rolling mics
+                               │
+                               ▼
+              reports/*.json + *.csv + blocks   ─▶   timelines/<DAY>.fcpxml
+                                                     (import into Resolve)
+```
+
+## Repository layout
+
+```
+wavesync.py                 the whole engine: scan, verify, FCPXML writer
+wavesync_gui.py             stdlib web UI (127.0.0.1, no dependencies)
+wavesync.config.example.json
+tests/test_e2e.py           ffmpeg-synthesized end-to-end test
+.github/workflows/ci.yml    selftest + e2e on ubuntu
+docs/                       icon + screenshots
+```
 
 ## Requirements
 
-- Python 3.10+, `numpy`, `scipy` (`pip install -r requirements.txt`,
-  or `pip install .` for the `wavesync`/`wavesync-gui` commands)
+- Python 3.10+, `numpy`, `scipy`
 - `ffmpeg` + `ffprobe` on PATH
 
-## Layout
+## Install
+
+```bash
+git clone https://github.com/Dvorinka/wavesync.git && cd wavesync
+pip install -r requirements.txt        # or: pip install .
+```
+
+## Setup
+
+```bash
+# point it at your folders — it finds recorders and day folders itself
+python wavesync.py --init --video-root /media/cam --audio-root /media/recs
+
+# or copy wavesync.config.example.json to wavesync.config.json by hand
+```
+
+## Media layout
 
 ```
 videos/2026-08-14/C0448.MP4 ...      one folder per shooting day
@@ -49,65 +127,49 @@ audio/prop/2026-08-14/*.wav
 ```
 
 Day folder names should match between `video_root` and each mic folder
-(unless remapped via `day_map`). **But all of this is flexible**:
-
-- any video container ffmpeg reads (MOV, MXF, MTS, AVI, MKV, ...)
-- any audio format (WAV, BWF, MP3, FLAC, M4A, AIFF, OGG, OPUS, ...)
-- files may sit in nested folders (AVCHD `STREAM/`, recorder subdirs)
-- no day folders at all? A flat folder of clips + a flat folder of
-  audio works - the correlation doesn't need your filing system
-
-## Setup
-
-```bash
-pip install -r requirements.txt
-# autodetect: inspect the folders and write a config
-python wavesync.py --init --video-root /media/cam --audio-root /media/recs
-# or copy wavesync.config.example.json to wavesync.config.json by hand
-```
-
-## GUI
-
-```bash
-python wavesync.py --gui        # or: python wavesync_gui.py
-```
-
-Opens a local web UI (127.0.0.1, stdlib only - no dependencies): pick
-folders in a browser dialog, auto-detect recorders, edit lanes/rolling
-flags, run scans with a live log, review matches and tick blocks,
-rebuild the timeline. Nothing leaves your machine.
+(unless remapped via `day_map`). But all of this is flexible: files may sit
+in nested folders, and a flat folder of clips plus a flat folder of audio
+works too — correlation doesn't need your filing system.
 
 ## Usage
 
 ```bash
-python wavesync.py 2026-08-14              # scan one day -> timeline
-python wavesync.py all                     # every day folder
+python wavesync.py 2026-08-14                    # scan one day -> timeline
+python wavesync.py all                           # every day folder
 python wavesync.py 2026-08-14 --video-range C0448-C0476
 python wavesync.py 2026-08-14 --only-video C0448.MP4
-python wavesync.py 2026-08-14 --timeline-only   # rebuild XML from report
-python wavesync.py 2026-08-14 --preview         # render check clips
-python wavesync.py --selftest              # sanity check, no config needed
-python wavesync.py --init --video-root V --audio-root A   # make config
-python wavesync.py --gui                   # local web UI
+python wavesync.py 2026-08-14 --timeline-only    # rebuild XML from report
+python wavesync.py 2026-08-14 --preview          # render check clips
+python wavesync.py --selftest                    # sanity check
 ```
 
 Then import `work_dir/timelines/<DAY>.fcpxml` in Resolve
-(File → Import → Timeline). Re-run after corrections — your blocks persist.
+(File → Import → Timeline). Re-run after corrections — blocks persist.
+
+## Web UI
+
+```bash
+python wavesync.py --gui        # or: python wavesync_gui.py --port 8710
+```
+
+A local single-page UI on `127.0.0.1`: browse folders, auto-detect
+recorders, edit lanes and rolling flags, run scans with a live log, review
+matches, tick blocks, rebuild the timeline. Nothing leaves your machine.
 
 ## Reading the report
 
 Each clip's `matches` carry `selected` plus a coverage span `cov_a..cov_b`
-(seconds into the video the WAV provably covers). Clip names in Resolve get
-tags:
+(seconds into the video the audio provably covers). Clip names in Resolve
+get tags:
 
-- `[CONT]` — placed by continuity (a rolling recorder was provably running;
-  content too quiet to verify). Listen before trusting.
-- `[GUESS]` — a weak/ambiguous candidate placed for review.
+- `[CONT]` — placed by continuity; the recorder was provably running but
+  the content is too quiet to verify. Listen before trusting.
+- `[GUESS]` — a weak or ambiguous candidate placed for review.
 - `AUDIO-ONLY` — recorded during the take but not matching; parked to keep.
 
-## Correcting mistakes — blocks file
+## Corrections — blocks file
 
-`work_dir/reports/<DAY>_blocks.json` (created on first use):
+`work_dir/reports/<DAY>_blocks.json` (also editable in the web UI):
 
 ```json
 {
@@ -116,41 +178,53 @@ tags:
 }
 ```
 
-- A WAV name keeps that file off that clip (match *and* parking).
+- A filename keeps that file off that clip (match *and* parking).
 - `"*"` means: this clip is camera-only.
-- After editing, regenerate: `python wavesync.py <DAY> --timeline-only`
+- Regenerate without rescanning: `python wavesync.py <DAY> --timeline-only`
 
-## Config keys
+## Configuration
 
 | key | meaning |
 |---|---|
 | `video_root` | folder containing day folders of videos |
 | `audio_root` | folder containing one subfolder per recorder |
-| `work_dir` | where reports/timelines/cache/previews go |
+| `work_dir` | reports / timelines / cache / previews output |
 | `mics` | `{"name": {"folder": str, "lane": int, "rolling": bool}}` — `rolling` mics get continuity fills for quiet stretches |
 | `day_map` | `{"mic": {"<video_day>": "<audio_day>"}}` for mislabeled days |
-| `skip_dirs` | subfolder names ignored when gathering WAVs |
+| `skip_dirs` | subfolder names ignored when gathering audio |
 | `skip_prefixes` | filename prefixes ignored |
 | `analysis_filter` | FFmpeg `-af` applied to analysis decodes only |
 | `sample_rate` | analysis decode rate (default 8000) |
 | `min_r_timeline` | correlation floor for timeline placement |
-| `video_exts` | override the built-in video container list |
-| `audio_exts` | override the built-in audio format list |
+| `video_exts` / `audio_exts` | override the built-in media extension lists |
 
-## How it works (short version)
+## The pipeline, precisely
 
-1. Decode each WAV + video audio track to mono at `sample_rate` (cached).
+1. Decode each audio file + video audio track to mono at `sample_rate`
+   (disk-cached — files decode once ever).
 2. Onset envelopes (spectral flux) cross-correlate → candidate shifts.
 3. Verified candidates get raw-audio Pearson probes at energetic peaks,
-   then swept inside the implied overlap to measure coverage.
+   then a sweep inside the implied overlap measures coverage.
 4. Per-mic coverage selection keeps multiple segments (recorder toggled
-   mid-take) and suppresses duplicates/echoes covering the same span.
+   mid-take) and suppresses duplicates and echoes covering the same span.
 5. File-consistency pass reconstructs each file's real recording window
    across all clips — echoes imply scattered windows and get dropped.
 6. Continuity fill: videos inside a proven rolling window get `[CONT]`.
-7. `write_fcpxml` emits Resolve's own XML dialect — `media-rep` children,
+7. `write_fcpxml` emits Resolve's own dialect — `media-rep` children,
    source timecode domains, collision-free lanes.
+
+## Documentation
+
+- [CHANGELOG.md](CHANGELOG.md) — release notes
+- [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup and rules of the road
+- [AGENTS.md](AGENTS.md) — operating playbook for agent-driven runs
+
+## Security
+
+Report vulnerabilities privately to **info@tdvorak.dev**. The web UI binds
+to `127.0.0.1` only; do not expose it to a network. See
+[SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT — see LICENSE.
+MIT — see [LICENSE](LICENSE).
